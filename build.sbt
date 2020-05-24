@@ -9,6 +9,8 @@ lazy val akkaVersion = "2.6.5"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor-typed" % akkaVersion,
   "com.typesafe.akka" %% "akka-remote" % akkaVersion,
+  "com.typesafe.akka" %% "akka-stream" % akkaVersion,
+  "com.typesafe.akka" %% "akka-http" % "10.1.12",
   "ch.qos.logback" % "logback-classic" % "1.2.3",
   "com.typesafe.slick" %% "slick" % "3.3.2",
   "org.xerial" % "sqlite-jdbc" % "3.31.1",

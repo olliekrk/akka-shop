@@ -13,7 +13,7 @@ class ShopActor(ctx: ActorContext[PriceRequest]) extends AbstractBehavior[PriceR
     val delay = Random.between(100, 501).milliseconds
     val response = PriceOffer(Random.between(1, 11), ctx.self)
     ctx.log.info(s"Price for ${msg.query.productName} is ${response.price}. Took $delay ms.")
-    ctx.scheduleOnce(delay, msg.from, response)
+    ctx.scheduleOnce(delay, msg.replyTo, response)
     this
   }
 
