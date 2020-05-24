@@ -6,7 +6,7 @@ sealed trait PriceResponse
 
 object PriceResponse {
 
-  case class PriceOffer(price: Int, shop: ActorRef[PriceRequest]) extends PriceResponse
+  case class PriceAvailable(price: Int, shop: ActorRef[PriceRequest], popularity: Int) extends PriceResponse
 
   case object PriceUnavailable extends PriceResponse
 
