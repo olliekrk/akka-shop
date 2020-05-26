@@ -7,14 +7,19 @@ import akka.http.scaladsl.coding.Deflate
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.{HttpApp, Route}
 import akka.util.Timeout
+import org.jsoup.Jsoup
 import shop.message.PriceQuery.PriceQuerySigned
 import shop.message.{PriceQuery, PriceResponse}
+import scala.jdk.CollectionConverters._
 
+import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.concurrent.duration._
 
 class PriceComparatorServer(implicit val system: ActorSystem[PriceQuery]) extends HttpApp {
 
-  implicit val timeout: Timeout = 3.seconds
+  import PriceComparatorServer._
+
+  implicit val executionContextExecutor: ExecutionContextExecutor = system.executionContext
 
   override def routes: Route =
     concat(
@@ -30,7 +35,18 @@ class PriceComparatorServer(implicit val system: ActorSystem[PriceQuery]) extend
       pathPrefix("review") {
         path(Segment) { productName =>
           encodeResponseWith(Deflate) {
-            complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, "<h1>Say hello to akka-http</h1>"))
+            val getAdvantages = Future {
+              Jsoup.connect(reviewRequestUrl(productName))
+                .get
+                .selectFirst(sectionSelector)
+                .select(pointSelector)
+                .asScala
+                .map(_.text)
+                .toList
+            }
+            onSuccess(getAdvantages) { advantages =>
+              complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, advantages.toString))
+            }
           }
         }
       }
@@ -45,5 +61,17 @@ class PriceComparatorServer(implicit val system: ActorSystem[PriceQuery]) extend
   override protected def postHttpBindingFailure(cause: Throwable): Unit = {
     println(s"The server could not be started due to $cause")
   }
+
+}
+
+object PriceComparatorServer {
+
+  implicit val timeout: Timeout = 3.seconds
+
+  private val sectionSelector = ".pl_attr"
+
+  private val pointSelector = "li"
+
+  def reviewRequestUrl(productName: String): String = s"https://www.opineo.pl/?szukaj=$productName&s=2"
 
 }
