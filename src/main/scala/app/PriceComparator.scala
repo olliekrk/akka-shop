@@ -13,6 +13,6 @@ object PriceComparator extends App {
   val server: PriceComparatorServer = new PriceComparatorServer()
 
   cli.runAsync()
-  server.startServer("localhost", 8080, actorSystem.classicSystem)
+  server.startServer("localhost", 9090, actorSystem.classicSystem)
 
 }

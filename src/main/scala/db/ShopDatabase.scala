@@ -13,6 +13,10 @@ class ShopDatabase() {
   val db = Database.forConfig("shopdb")
   val products: TableQuery[Products] = TableQuery[Products]
 
+  def getPopularity(productName: String)(implicit ctx: ExecutionContext): Future[Option[DBProduct]] = db.run {
+    products.filter(_.name === productName).take(1).result.headOption
+  }
+
   def incrementPopularity(productName: String)(implicit ctx: ExecutionContext): Future[Option[DBProduct]] = db.run {
     {
       for {
