@@ -9,7 +9,7 @@ class ClientActor(ctx: ActorContext[PriceResponse]) extends AbstractBehavior[Pri
 
   override def onMessage(msg: PriceResponse): Behavior[PriceResponse] = msg match {
     case PriceAvailable(price, shop, popularity) =>
-      ctx.log.info(s"Received response. The best price is: $price from shop: $shop. Query popularity: $popularity")
+      ctx.log.info(s"Response: best price is: $price, shop: $shop, popularity: ${popularity.getOrElse("unknown")}")
       Behaviors.stopped
     case PriceUnavailable =>
       ctx.log.warn(s"Failed to get the best price.")

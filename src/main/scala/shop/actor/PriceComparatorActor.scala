@@ -7,13 +7,14 @@ import akka.util.Timeout
 import db.ShopDatabase
 import shop.message.PriceQuery.{PriceQueryAnonymous, PriceQuerySigned}
 import shop.message.PriceResponse.{PriceAvailable, PriceUnavailable}
-import shop.message.{PriceOffer, PriceQuery, PriceRequest, PriceResponse}
+import shop.message._
 
 import scala.concurrent.duration.DurationDouble
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
-class PriceComparatorActor(shops: Seq[ActorRef[PriceRequest]], shopDb: ShopDatabase)
+class PriceComparatorActor(shops: Seq[ActorRef[PriceRequest]],
+                           shopDb: ActorRef[PopularityRequest])
                           (implicit ctx: ActorContext[PriceQuery])
   extends AbstractBehavior[PriceQuery](ctx) {
 
@@ -23,25 +24,26 @@ class PriceComparatorActor(shops: Seq[ActorRef[PriceRequest]], shopDb: ShopDatab
   private implicit val executionContext: ExecutionContextExecutor = system.executionContext
 
   override def onMessage(msg: PriceQuery): Behavior[PriceQuery] = {
-    Future.delegate(updateProductPopularity(msg.productName))
+    val popularity = shopDb.?[PopularityResponse](PopularityRequest(msg.productName, _))(1.minute, implicitly)
     msg match {
-      case query: PriceQueryAnonymous => handleAnonymousQuery(query)
-      case query: PriceQuerySigned => handleSignedQuery(query)
+      case query: PriceQueryAnonymous => handleAnonymousQuery(query, popularity)
+      case query: PriceQuerySigned => handleSignedQuery(query, popularity)
     }
     this
   }
 
-  private def handleAnonymousQuery(query: PriceQueryAnonymous): Unit = {
+  private def handleAnonymousQuery(query: PriceQueryAnonymous, popularityFuture: Future[PopularityResponse]): Unit = {
     val client = ctx.spawnAnonymous(ClientActor())
     checkPrices(query) onComplete {
       case Success(offers) =>
         findBestOffer(offers) match {
           case PriceUnavailable => client ! PriceUnavailable
-          case PriceAvailable(price, shop, _) => getProductPopularity(query.productName) onComplete {
-            case Success(popularity) => client ! PriceAvailable(price, shop, popularity)
-            case Failure(exception) =>
-              ctx.stop(client)
-              ctx.log.error("Failed to update popularity for a product", exception)
+          case PriceAvailable(price, shop, _) => popularityFuture.value match {
+            case Some(Success(PopularityResponse(popularity))) =>
+              client ! PriceAvailable(price, shop, Some(popularity))
+            case _ =>
+              ctx.log.error(s"Popularity could not be checked for product ${query.productName}.")
+              client ! PriceAvailable(price, shop, None)
           }
         }
       case Failure(exception) =>
@@ -50,17 +52,21 @@ class PriceComparatorActor(shops: Seq[ActorRef[PriceRequest]], shopDb: ShopDatab
     }
   }
 
-  private def handleSignedQuery(query: PriceQuerySigned): Unit =
+  private def handleSignedQuery(query: PriceQuerySigned, popularityFuture: Future[PopularityResponse]): Unit =
     checkPrices(query) onComplete {
       case Success(offers) =>
         findBestOffer(offers) match {
           case PriceUnavailable => query.replyTo ! PriceUnavailable
-          case PriceAvailable(price, shop, _) => getProductPopularity(query.productName) onComplete {
-            case Success(popularity) => query.replyTo ! PriceAvailable(price, shop, popularity)
-            case Failure(exception) => ctx.log.error("Failed to update popularity for a product", exception)
+          case PriceAvailable(price, shop, _) => popularityFuture.value match {
+            case Some(Success(PopularityResponse(popularity))) =>
+              query.replyTo ! PriceAvailable(price, shop, Some(popularity))
+            case _ =>
+              ctx.log.error(s"Popularity could not be checked for product ${query.productName}.")
+              query.replyTo ! PriceAvailable(price, shop, None)
           }
         }
-      case Failure(exception) => ctx.log.error("Failed to get the best price", exception)
+      case Failure(exception) =>
+        ctx.log.error("Failed to get the best price", exception)
     }
 
   private def findBestOffer(offers: Seq[PriceResponse]): PriceResponse =
@@ -73,15 +79,10 @@ class PriceComparatorActor(shops: Seq[ActorRef[PriceRequest]], shopDb: ShopDatab
   private def checkPrices(query: PriceQuery): Future[Seq[PriceResponse]] = Future.sequence {
     shops
       .map(_.?[PriceOffer](PriceRequest(query, _)))
-      .map(_.flatMap(offer => Future.successful(PriceAvailable(offer.price, offer.shop, 0))))
+      .map(_.flatMap(offer => Future.successful(PriceAvailable(offer.price, offer.shop, None))))
       .map(_.recover(_ => PriceUnavailable))
   }
 
-  private def getProductPopularity(productName: String): Future[Int] =
-    shopDb.getPopularity(productName).map(_.map(_.popularity).getOrElse(0))
-
-  private def updateProductPopularity(productName: String): Future[Int] =
-    shopDb.incrementPopularity(productName).map(_.map(_.popularity).get)
 }
 
 object PriceComparatorActor {
@@ -90,11 +91,12 @@ object PriceComparatorActor {
 
   def apply(): Behavior[PriceQuery] = Behaviors.setup { implicit ctx =>
     val db = ShopDatabase.create
+    val shopDb = ctx.spawn(ShopDatabaseActor(db), "shopDbActor")
     val shops = Seq(
       ctx.spawn(ShopActor(), "firstShop"),
       ctx.spawn(ShopActor(), "secondShop"),
     )
-    new PriceComparatorActor(shops, db)
+    new PriceComparatorActor(shops, shopDb)
   }
 
 }
